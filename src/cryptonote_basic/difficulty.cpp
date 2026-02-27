@@ -239,6 +239,69 @@ namespace cryptonote {
     return res.convert_to<difficulty_type>();
   }
 
+  // LWMA-1 difficulty algorithm by zawy12
+  // https://github.com/zawy12/difficulty-algorithms/issues/3
+  //
+  // Attempt to adjust difficulty in ~60 blocks instead of ~720.
+  // Each block's solvetime is weighted linearly: weight[i] = i.
+  // Recent blocks have the highest weight, making the algorithm
+  // respond quickly to hashrate changes while smoothing noise.
+  //
+  // Formula:
+  //   next_diff = avg_difficulty * T * N * (N+1) / (2 * weighted_solvetimes)
+  // Simplified:
+  //   next_diff = total_difficulty * T * (N+1) / (2 * weighted_solvetimes)
+  //
+  difficulty_type next_difficulty_lwma(std::vector<uint64_t> timestamps, std::vector<difficulty_type> cumulative_difficulties, size_t target_seconds) {
+    const int64_t T = static_cast<int64_t>(target_seconds);
+    const int64_t N = static_cast<int64_t>(DIFFICULTY_WINDOW_LWMA);
+
+    assert(timestamps.size() == cumulative_difficulties.size());
+
+    if (timestamps.size() <= 1)
+      return 1;
+
+    // Use at most the last N+1 entries (giving N solvetimes)
+    int64_t n = std::min(static_cast<int64_t>(timestamps.size()) - 1, N);
+    if (n <= 0)
+      return 1;
+
+    size_t start = timestamps.size() - 1 - static_cast<size_t>(n);
+    int64_t weighted_solvetimes = 0;
+
+    difficulty_type total_difficulty = 0;
+
+    for (int64_t i = 1; i <= n; i++) {
+      size_t idx = start + static_cast<size_t>(i);
+
+      int64_t solvetime = static_cast<int64_t>(timestamps[idx]) - static_cast<int64_t>(timestamps[idx - 1]);
+
+      // Clamp: floor at 1 to prevent timestamp manipulation attacks,
+      // ceiling at 6*T to limit the impact of outlier slow blocks
+      solvetime = std::max<int64_t>(solvetime, 1);
+      solvetime = std::min<int64_t>(solvetime, 6 * T);
+
+      weighted_solvetimes += solvetime * i;
+
+      total_difficulty += cumulative_difficulties[idx] - cumulative_difficulties[idx - 1];
+    }
+
+    if (weighted_solvetimes <= 0)
+      weighted_solvetimes = 1;
+
+    // next_diff = total_difficulty * T * (N+1) / (2 * weighted_solvetimes)
+    boost::multiprecision::uint256_t res =
+        boost::multiprecision::uint256_t(total_difficulty) * T * (n + 1) /
+        (2 * weighted_solvetimes);
+
+    if (res < 1)
+      res = 1;
+    if (res > max128bit)
+      return max128bit.convert_to<difficulty_type>();
+
+    return res.convert_to<difficulty_type>();
+  }
+
   std::string hex(difficulty_type v)
   {
     static const char chars[] = "0123456789abcdef";
