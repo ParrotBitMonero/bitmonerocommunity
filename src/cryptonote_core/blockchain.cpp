@@ -924,22 +924,6 @@ difficulty_type Blockchain::get_difficulty_for_next_block()
 
   LOG_PRINT_L3("Blockchain::" << __func__);
 
-  uint8_t hf_version = m_hardfork->get_current_version();
-
-  size_t difficulty_window;
-  size_t difficulty_cut;
-  size_t difficulty_lag = DIFFICULTY_LAG;
-
-  if (hf_version >= 17)
-  {
-    difficulty_window = 60;
-    difficulty_cut = 6;
-  }
-  else
-  {
-    difficulty_window = 720;
-    difficulty_cut = 60;
-  }
 
   crypto::hash top_hash = get_tail_id();
   {
