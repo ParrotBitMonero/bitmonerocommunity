@@ -284,4 +284,4 @@ namespace cryptonote {
     return "0x" + s;
   }
 
-}//
+
