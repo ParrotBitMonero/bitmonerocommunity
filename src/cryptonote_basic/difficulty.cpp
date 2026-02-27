@@ -217,7 +217,7 @@ namespace cryptonote
          time_span - 1) /
         time_span;
 
-    return res.convert_to<difficulty_type>();
+        return res.convert_to<difficulty_type>();
   }
 
   std::string hex(difficulty_type v)
