@@ -267,7 +267,7 @@ namespace cryptonote {
     return res.convert_to<difficulty_type>();
 }
 
-  }
+  
 
   std::string hex(difficulty_type v)
   {
