@@ -35,6 +35,7 @@ const hardfork_t mainnet_hard_forks[] = {
   // Keep genesis at v1, then switch to RandomX (v16) immediately after.
   { 1, 1, 0, 0 },
   { 16, 2, 0, 1 },
+ { 17, 33000, 0, 0 }, // Difficulty window reduction fork
 };
 const size_t num_mainnet_hard_forks = sizeof(mainnet_hard_forks) / sizeof(mainnet_hard_forks[0]);
 const uint64_t mainnet_hard_fork_version_1_till = 1;
