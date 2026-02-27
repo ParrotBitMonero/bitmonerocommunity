@@ -32,6 +32,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include "int-util.h"
@@ -42,32 +43,118 @@
 #undef MONERO_DEFAULT_LOG_CATEGORY
 #define MONERO_DEFAULT_LOG_CATEGORY "difficulty"
 
-namespace cryptonote {
+namespace cryptonote
+{
 
   using std::size_t;
   using std::uint64_t;
   using std::vector;
 
-  const difficulty_type max64bit(std::numeric_limits<std::uint64_t>::max());
-  const boost::multiprecision::uint256_t max128bit(std::numeric_limits<boost::multiprecision::uint128_t>::max());
-  const boost::multiprecision::uint512_t max256bit(std::numeric_limits<boost::multiprecision::uint256_t>::max());
+#if defined(__x86_64__)
+  static inline void mul(uint64_t a, uint64_t b, uint64_t &low, uint64_t &high)
+  {
+    low = mul128(a, b, &high);
+  }
+#else
+  static inline void mul(uint64_t a, uint64_t b, uint64_t &low, uint64_t &high)
+  {
+    __uint128_t res = (__uint128_t)a * (__uint128_t)b;
+    low = (uint64_t)res;
+    high = (uint64_t)(res >> 64);
+  }
+#endif
 
-#define FORCE_FULL_128_BITS
+  static inline bool cadd(uint64_t a, uint64_t b)
+  {
+    return a + b < a;
+  }
+
+  static inline bool cadc(uint64_t a, uint64_t b, bool c)
+  {
+    return a + b < a || (c && a + b == (uint64_t)-1);
+  }
+
+  bool check_hash_64(const crypto::hash &hash, uint64_t difficulty)
+  {
+    uint64_t low, high, top, cur;
+
+    mul(swap64le(((const uint64_t *)&hash)[3]), difficulty, top, high);
+    if (high != 0)
+      return false;
+
+    mul(swap64le(((const uint64_t *)&hash)[0]), difficulty, low, cur);
+    mul(swap64le(((const uint64_t *)&hash)[1]), difficulty, low, high);
+    bool carry = cadd(cur, low);
+
+    cur = high;
+    mul(swap64le(((const uint64_t *)&hash)[2]), difficulty, low, high);
+
+    carry = cadc(cur, low, carry);
+    carry = cadc(high, top, carry);
+
+    return !carry;
+  }
+
+  uint64_t next_difficulty_64(std::vector<uint64_t> timestamps,
+                              std::vector<uint64_t> cumulative_difficulties,
+                              size_t target_seconds)
+  {
+    size_t window = DIFFICULTY_WINDOW;
+    size_t cut = DIFFICULTY_CUT;
+
+    if (timestamps.size() > window)
+    {
+      timestamps.resize(window);
+      cumulative_difficulties.resize(window);
+    }
+
+    size_t length = timestamps.size();
+    if (length <= 1)
+      return 1;
+
+    std::sort(timestamps.begin(), timestamps.end());
+
+    size_t cut_begin, cut_end;
+
+    if (length <= window - 2 * cut)
+    {
+      cut_begin = 0;
+      cut_end = length;
+    }
+    else
+    {
+      cut_begin = (length - (window - 2 * cut) + 1) / 2;
+      cut_end = cut_begin + (window - 2 * cut);
+    }
+
+    uint64_t time_span = timestamps[cut_end - 1] - timestamps[cut_begin];
+    if (time_span == 0)
+      time_span = 1;
+
+    uint64_t total_work =
+        cumulative_difficulties[cut_end - 1] -
+        cumulative_difficulties[cut_begin];
+
+    uint64_t low, high;
+    mul(total_work, target_seconds, low, high);
+
+    if (high != 0 || low + time_span - 1 < low)
+      return 0;
+
+    return (low + time_span - 1) / time_span;
+  }
+
+  const difficulty_type max64bit(std::numeric_limits<uint64_t>::max());
+  const boost::multiprecision::uint256_t max128bit(
+      std::numeric_limits<boost::multiprecision::uint128_t>::max());
+  const boost::multiprecision::uint512_t max256bit(
+      std::numeric_limits<boost::multiprecision::uint256_t>::max());
 
   bool check_hash_128(const crypto::hash &hash, difficulty_type difficulty)
   {
-#ifndef FORCE_FULL_128_BITS
-    if (difficulty >= max64bit && ((const uint64_t *)&hash)[3] > 0)
-      return false;
-#endif
-
     boost::multiprecision::uint512_t hashVal = 0;
 
-#ifdef FORCE_FULL_128_BITS
     for (int i = 0; i < 4; i++)
-#else
-    for (int i = 1; i < 4; i++)
-#endif
     {
       hashVal <<= 64;
       hashVal |= swap64le(((const uint64_t *)&hash)[3 - i]);
@@ -79,7 +166,7 @@ namespace cryptonote {
   bool check_hash(const crypto::hash &hash, difficulty_type difficulty)
   {
     if (difficulty <= max64bit)
-      return check_hash_64(hash, difficulty.convert_to<std::uint64_t>());
+      return check_hash_64(hash, difficulty.convert_to<uint64_t>());
     else
       return check_hash_128(hash, difficulty);
   }
@@ -90,12 +177,6 @@ namespace cryptonote {
   {
     size_t window = DIFFICULTY_WINDOW;
     size_t cut = DIFFICULTY_CUT;
-
-    if (target_seconds == DIFFICULTY_TARGET_V2)
-    {
-      window = 45;
-      cut = 4;
-    }
 
     if (timestamps.size() > window)
     {
@@ -132,10 +213,11 @@ namespace cryptonote {
 
     boost::multiprecision::uint256_t res =
         (boost::multiprecision::uint256_t(total_work) *
-         target_seconds + time_span - 1) /
+             target_seconds +
+         time_span - 1) /
         time_span;
 
-     return res.convert_to<difficulty_type>();
+    return res.convert_to<difficulty_type>();
   }
 
   std::string hex(difficulty_type v)
@@ -156,4 +238,4 @@ namespace cryptonote {
     return "0x" + s;
   }
 
-}
+} // namespace cryptonote
